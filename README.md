@@ -43,6 +43,8 @@ A production-ready Docker setup for local code indexing using Qdrant vector data
 - Docker Compose 2.0+ OR Podman Compose
 - curl (for health checks)
 
+> **Note**: Podman support requires Podman 4.0+ with compose functionality. On some systems, you may need to configure Podman's socket or enable lingering for proper operation.
+
 ## 🎯 Embedding Model Selection
 
 Choose between two embedding models based on your system capabilities:
@@ -444,18 +446,33 @@ The PowerShell setup script provides the same functionality:
    podman compose up -d
    ```
 
-#### Permission Issues
+#### Podman-Specific Issues
 
-1. **Linux/macOS**:
+1. **Permission errors or cgroup issues**:
    ```bash
-   # Fix data directory permissions
-   sudo chown -R $USER:$USER ./data
-   chmod -R 755 ./data
+   # Enable lingering for user services
+   loginctl enable-linger $USER
+   
+   # Start podman socket
+   systemctl --user enable --now podman.socket
+   
+   # Set DOCKER_HOST for compose compatibility
+   export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
    ```
 
-2. **Windows**:
-   - Ensure Docker has access to the drive
-   - Run Docker Desktop as administrator if needed
+2. **Compose provider warnings**:
+   - Podman uses Docker's compose plugin for compatibility
+   - Warning messages about "external compose provider" are normal
+   - Functionality remains the same as Docker Compose
+
+3. **Network connectivity issues**:
+   ```bash
+   # Check if services are bound to correct interfaces
+   podman ps
+   
+   # Check podman system info
+   podman system info
+   ```
 
 ### Performance Optimization
 
@@ -496,6 +513,42 @@ docker stats
 # View resource usage - Podman
 podman stats
 ```
+
+## 🔧 Container Runtime Support
+
+This setup supports both Docker and Podman as container runtimes. The setup scripts automatically detect which runtime is available and use the appropriate commands.
+
+### Runtime Detection
+
+The setup scripts detect container runtimes in the following order:
+
+1. **Podman** - If `podman` is available and supports `podman compose`
+2. **Docker** - If `docker` is available with either `docker compose` or `docker-compose`
+
+### Manual Runtime Selection
+
+You can also run containers manually:
+
+```bash
+# Using Docker
+docker compose up -d
+docker compose down
+
+# Using Podman
+podman compose up -d
+podman compose down
+
+# Using legacy docker-compose
+docker-compose up -d
+docker-compose down
+```
+
+### Compatibility
+
+- The `docker-compose.yml` file is compatible with both Docker and Podman
+- Environment variables work the same way in both runtimes
+- Data persistence and networking function identically
+- Health checks and resource limits are supported by both
 
 ## 🔧 Advanced Configuration
 

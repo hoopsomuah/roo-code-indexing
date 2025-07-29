@@ -48,6 +48,9 @@ check_requirements() {
             CONTAINER_RUNTIME="podman"
             COMPOSE_CMD="podman compose"
             print_success "Using Podman with compose support"
+            
+            # Set DOCKER_HOST for podman compose compatibility
+            export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
         else
             print_warning "Podman found but compose support not available"
         fi
