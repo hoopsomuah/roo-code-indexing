@@ -345,6 +345,22 @@ curl http://localhost:11434/api/tags
      }'
    ```
 
+### Container Runtime Testing
+
+A test script is provided to validate both Docker and Podman functionality:
+
+```bash
+# Test container runtime compatibility
+./test-container-support.sh
+
+# The script will automatically test:
+# - Runtime detection
+# - Service startup
+# - Health checks
+# - API endpoints
+# - Cleanup
+```
+
 ### Using the Setup Scripts
 
 #### Linux/macOS (Bash)
