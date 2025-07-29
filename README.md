@@ -22,9 +22,14 @@ A production-ready Docker setup for local code indexing using Qdrant vector data
    # On Windows (using Git Bash or WSL):
    bash setup.sh
    
-   # Or manually:
-   docker-compose up -d
+   # Or manually with Docker:
+   docker compose up -d
+   
+   # Or manually with Podman:
+   podman compose up -d
    ```
+
+> **Note**: The setup scripts automatically detect whether you have Docker or Podman installed and use the appropriate container runtime. Podman support requires Podman 4.0+ with compose functionality.
 
 ## 📋 System Requirements
 
@@ -34,8 +39,8 @@ A production-ready Docker setup for local code indexing using Qdrant vector data
 - **Storage**: 10GB+ free space for models and data
 
 ### Software Requirements
-- Docker 20.10+
-- Docker Compose 2.0+
+- Docker 20.10+ OR Podman 4.0+
+- Docker Compose 2.0+ OR Podman Compose
 - curl (for health checks)
 
 ## 🎯 Embedding Model Selection
@@ -119,11 +124,19 @@ These directories are automatically created and mounted as Docker volumes for da
 ### Starting Services
 
 ```bash
-# Start all services
-docker-compose up -d
+# Start all services (auto-detects Docker/Podman)
+./setup.sh
+
+# Or manually with Docker:
+docker compose up -d
+
+# Or manually with Podman:
+podman compose up -d
 
 # Start with logs
-docker-compose up
+docker compose up
+# or
+podman compose up
 
 # Using the setup script
 ./setup.sh
@@ -132,52 +145,72 @@ docker-compose up
 ### Stopping Services
 
 ```bash
-# Stop services (keeps data)
-docker-compose down
+# Stop services (keeps data) - Docker
+docker compose down
 
-# Stop and remove volumes (deletes data)
-docker-compose down -v
+# Stop services (keeps data) - Podman  
+podman compose down
+
+# Stop and remove volumes (deletes data) - Docker
+docker compose down -v
+
+# Stop and remove volumes (deletes data) - Podman
+podman compose down -v
 ```
 
 ### Restarting Services
 
 ```bash
-# Restart all services
-docker-compose restart
+# Restart all services - Docker
+docker compose restart
 
-# Restart specific service
-docker-compose restart qdrant
-docker-compose restart ollama
+# Restart all services - Podman
+podman compose restart
+
+# Restart specific service - Docker
+docker compose restart qdrant
+docker compose restart ollama
+
+# Restart specific service - Podman
+podman compose restart qdrant
+podman compose restart ollama
 ```
 
 ### Auto-start with System Boot
 
-The services are configured with `restart: unless-stopped` in the [`docker-compose.yml`](docker-compose.yml:16), which means they will automatically restart if they crash or if Docker restarts. To enable full auto-start on system boot across any operating system:
+The services are configured with `restart: unless-stopped` in the [`docker-compose.yml`](docker-compose.yml:16), which means they will automatically restart if they crash or if the container runtime (Docker/Podman) restarts. To enable full auto-start on system boot across any operating system:
 
 #### Simple Cross-Platform Setup
 
-1. **Configure Docker to start at login/boot**:
-   - **Windows**: Docker Desktop → Settings → General → "Start Docker Desktop when you log in"
-   - **macOS**: Docker Desktop → Settings → General → "Start Docker Desktop when you log in"
-   - **Linux**: Enable Docker service: `sudo systemctl enable docker`
+1. **Configure container runtime to start at login/boot**:
+   - **Windows**: Docker Desktop → Settings → General → "Start Docker Desktop when you log in" OR Podman Desktop → Settings → General → "Start Podman Desktop when you log in"
+   - **macOS**: Docker Desktop → Settings → General → "Start Docker Desktop when you log in" OR Podman Desktop → Settings → General → "Start Podman Desktop when you log in"  
+   - **Linux**: Enable Docker service: `sudo systemctl enable docker` OR Enable Podman service: `sudo systemctl enable podman`
 
 2. **Start the services once**:
    ```bash
-   docker-compose up -d
+   # Using Docker
+   docker compose up -d
+   
+   # Using Podman
+   podman compose up -d
+   
+   # Using setup script (auto-detects)
+   ./setup.sh
    ```
 
 3. **That's it!** The services will now:
-   - Start automatically when Docker starts (at system boot/login)
+   - Start automatically when the container runtime starts (at system boot/login)
    - Restart automatically if they crash or stop unexpectedly
-   - Continue running until you explicitly stop them with `docker-compose down`
+   - Continue running until you explicitly stop them with `[docker|podman] compose down`
 
 #### How It Works
 
 The [`docker-compose.yml`](docker-compose.yml:16) includes `restart: unless-stopped` for both services, which means:
 - Services restart automatically if they exit unexpectedly
-- Services start automatically when Docker daemon starts
-- Services only stop when explicitly stopped with `docker-compose down`
-- Services survive system reboots as long as Docker starts automatically
+- Services start automatically when the container runtime (Docker/Podman) daemon starts
+- Services only stop when explicitly stopped with `[docker|podman] compose down`
+- Services survive system reboots as long as the container runtime starts automatically
 
 #### Advanced Platform-Specific Options
 
@@ -200,8 +233,8 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$(pwd)
-ExecStart=/usr/bin/docker-compose up -d
-ExecStop=/usr/bin/docker-compose down
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
 
 [Install]
@@ -223,8 +256,8 @@ For more control than Docker Desktop's auto-start:
 2. Create Basic Task → "Start Roo Indexing"
 3. Trigger: "When the computer starts"
 4. Action: "Start a program"
-5. Program: `docker-compose`
-6. Arguments: `up -d`
+5. Program: `docker`
+6. Arguments: `compose up -d`
 7. Start in: `C:\path\to\your\roo-docker-setup`
 </details>
 
@@ -244,7 +277,8 @@ sudo tee /Library/LaunchDaemons/com.roo.indexing.plist > /dev/null <<EOF
     <string>com.roo.indexing</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/docker-compose</string>
+        <string>/usr/local/bin/docker</string>
+        <string>compose</string>
         <string>up</string>
         <string>-d</string>
     </array>
@@ -271,11 +305,16 @@ The setup includes automatic health checks. Verify services are running:
 
 ```bash
 # Check service status
-docker-compose ps
+docker compose ps
+# or
+podman compose ps
 
 # Check health status
-docker-compose logs qdrant
-docker-compose logs ollama
+docker compose logs qdrant
+docker compose logs ollama
+# or
+podman compose logs qdrant
+podman compose logs ollama
 
 # Manual health checks
 curl http://localhost:6333/health
@@ -343,10 +382,13 @@ The PowerShell setup script provides the same functionality:
 
 #### Services Won't Start
 
-1. **Check Docker is running**:
+1. **Check Docker/Podman is running**:
    ```bash
    docker --version
-   docker-compose --version
+   docker compose --version
+   # or
+   podman --version
+   podman compose version
    ```
 
 2. **Check port conflicts**:
@@ -366,8 +408,11 @@ The PowerShell setup script provides the same functionality:
 
 1. **Model not found**:
    ```bash
-   # Pull model manually
+   # Pull model manually with Docker
    docker exec roo-ollama ollama pull nomic-embed-text
+   
+   # Pull model manually with Podman
+   podman exec roo-ollama ollama pull nomic-embed-text
    ```
 
 2. **Out of memory errors**:
@@ -379,14 +424,24 @@ The PowerShell setup script provides the same functionality:
 
 1. **Check Qdrant logs**:
    ```bash
-   docker-compose logs qdrant
+   # Docker
+   docker compose logs qdrant
+   
+   # Podman
+   podman compose logs qdrant
    ```
 
 2. **Reset Qdrant data**:
    ```bash
-   docker-compose down
+   # Docker
+   docker compose down
    rm -rf ./data/qdrant
-   docker-compose up -d
+   docker compose up -d
+   
+   # Podman
+   podman compose down
+   rm -rf ./data/qdrant
+   podman compose up -d
    ```
 
 #### Permission Issues
@@ -421,15 +476,25 @@ The PowerShell setup script provides the same functionality:
 ### Logs and Monitoring
 
 ```bash
-# View all logs
-docker-compose logs -f
+# View all logs - Docker
+docker compose logs -f
 
-# View specific service logs
-docker-compose logs -f qdrant
-docker-compose logs -f ollama
+# View all logs - Podman  
+podman compose logs -f
 
-# View resource usage
+# View specific service logs - Docker
+docker compose logs -f qdrant
+docker compose logs -f ollama
+
+# View specific service logs - Podman
+podman compose logs -f qdrant
+podman compose logs -f ollama
+
+# View resource usage - Docker
 docker stats
+
+# View resource usage - Podman
+podman stats
 ```
 
 ## 🔧 Advanced Configuration
@@ -452,8 +517,11 @@ docker stats
 The services use a custom Docker network `roo-code-indexing` for isolation. To connect external services:
 
 ```bash
-# Connect another container to the network
+# Connect another container to the network - Docker
 docker network connect roo-code-indexing your-container-name
+
+# Connect another container to the network - Podman
+podman network connect roo-code-indexing your-container-name
 ```
 
 ### Scaling Considerations

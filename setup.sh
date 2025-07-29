@@ -38,17 +38,46 @@ command_exists() {
 check_requirements() {
     print_status "Checking system requirements..."
     
-    # Check if Docker is installed
-    if ! command_exists docker; then
-        print_error "Docker is not installed. Please install Docker first."
-        exit 1
+    # Check for container runtime (Docker or Podman)
+    CONTAINER_RUNTIME=""
+    COMPOSE_CMD=""
+    
+    if command_exists podman; then
+        print_status "Podman found, checking compose support..."
+        if podman compose version >/dev/null 2>&1; then
+            CONTAINER_RUNTIME="podman"
+            COMPOSE_CMD="podman compose"
+            print_success "Using Podman with compose support"
+        else
+            print_warning "Podman found but compose support not available"
+        fi
     fi
     
-    # Check if Docker Compose is installed
-    if ! command_exists docker-compose && ! docker compose version >/dev/null 2>&1; then
-        print_error "Docker Compose is not installed. Please install Docker Compose first."
-        exit 1
+    # Fall back to Docker if Podman not available or doesn't have compose
+    if [ -z "$CONTAINER_RUNTIME" ]; then
+        if command_exists docker; then
+            print_status "Docker found, checking compose support..."
+            if command_exists docker-compose; then
+                CONTAINER_RUNTIME="docker"
+                COMPOSE_CMD="docker-compose"
+                print_success "Using Docker with docker-compose"
+            elif docker compose version >/dev/null 2>&1; then
+                CONTAINER_RUNTIME="docker"
+                COMPOSE_CMD="docker compose"
+                print_success "Using Docker with compose plugin"
+            else
+                print_error "Docker found but no compose support available"
+                exit 1
+            fi
+        else
+            print_error "Neither Docker nor Podman is installed. Please install one of them first."
+            exit 1
+        fi
     fi
+    
+    # Export for use by other functions
+    export CONTAINER_RUNTIME
+    export COMPOSE_CMD
     
     # Check available memory
     if command_exists free; then
@@ -98,17 +127,10 @@ setup_env_file() {
 
 # Function to start services
 start_services() {
-    print_status "Starting Docker services..."
-    
-    # Use docker-compose or docker compose based on availability
-    if command_exists docker-compose; then
-        COMPOSE_CMD="docker-compose"
-    else
-        COMPOSE_CMD="docker compose"
-    fi
+    print_status "Starting $CONTAINER_RUNTIME services..."
     
     # Pull images first
-    print_status "Pulling Docker images..."
+    print_status "Pulling container images..."
     $COMPOSE_CMD pull
     
     # Start services
@@ -164,7 +186,7 @@ pull_embedding_model() {
     print_warning "This may take several minutes depending on your internet connection..."
     
     # Pull the model using Ollama API
-    if ! docker exec roo-ollama ollama pull "$MODEL"; then
+    if ! $CONTAINER_RUNTIME exec roo-ollama ollama pull "$MODEL"; then
         print_error "Failed to pull embedding model: $MODEL"
         print_error "Please check your internet connection and try again"
         exit 1
@@ -178,12 +200,12 @@ verify_setup() {
     print_status "Verifying setup..."
     
     # Check if services are running
-    if ! docker ps | grep -q roo-qdrant; then
+    if ! $CONTAINER_RUNTIME ps | grep -q roo-qdrant; then
         print_error "Qdrant container is not running"
         exit 1
     fi
     
-    if ! docker ps | grep -q roo-ollama; then
+    if ! $CONTAINER_RUNTIME ps | grep -q roo-ollama; then
         print_error "Ollama container is not running"
         exit 1
     fi
@@ -194,7 +216,7 @@ verify_setup() {
     fi
     MODEL="${EMBEDDING_MODEL:-nomic-embed-text}"
     
-    if ! docker exec roo-ollama ollama list | grep -q "$MODEL"; then
+    if ! $CONTAINER_RUNTIME exec roo-ollama ollama list | grep -q "$MODEL"; then
         print_warning "Embedding model $MODEL not found in Ollama"
         return 1
     fi
@@ -219,9 +241,9 @@ show_status() {
     echo "  • Qdrant: ${QDRANT_STORAGE_PATH:-./data/qdrant}"
     echo "  • Ollama: ${OLLAMA_MODELS_PATH:-./data/ollama}"
     echo
-    echo "To stop services: docker-compose down"
-    echo "To view logs: docker-compose logs -f"
-    echo "To restart: docker-compose restart"
+    echo "To stop services: $COMPOSE_CMD down"
+    echo "To view logs: $COMPOSE_CMD logs -f"
+    echo "To restart: $COMPOSE_CMD restart"
     echo
 }
 

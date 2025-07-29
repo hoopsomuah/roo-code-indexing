@@ -47,36 +47,62 @@ function Test-Command {
 function Test-Requirements {
     Write-Status "Checking system requirements..."
     
-    # Check if Docker is installed
-    if (-not (Test-Command "docker")) {
-        Write-Error "Docker is not installed. Please install Docker Desktop for Windows first."
-        Write-Host "Download from: https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
-        exit 1
+    # Check for container runtime (Podman or Docker)
+    $script:ContainerRuntime = ""
+    $script:ComposeCommand = ""
+    
+    # Check for Podman first
+    if (Test-Command "podman") {
+        Write-Status "Podman found, checking compose support..."
+        try {
+            podman compose version | Out-Null
+            $script:ContainerRuntime = "podman"
+            $script:ComposeCommand = "podman compose"
+            Write-Success "Using Podman with compose support"
+        }
+        catch {
+            Write-Warning "Podman found but compose support not available"
+        }
     }
     
-    # Check if Docker is running
-    try {
-        docker version | Out-Null
-    }
-    catch {
-        Write-Error "Docker is not running. Please start Docker Desktop."
-        exit 1
-    }
-    
-    # Check if Docker Compose is available
-    $composeAvailable = $false
-    if (Test-Command "docker-compose") {
-        $composeAvailable = $true
-        $script:ComposeCommand = "docker-compose"
-    }
-    elseif ((docker compose version 2>$null) -ne $null) {
-        $composeAvailable = $true
-        $script:ComposeCommand = "docker compose"
-    }
-    
-    if (-not $composeAvailable) {
-        Write-Error "Docker Compose is not available. Please ensure Docker Desktop is properly installed."
-        exit 1
+    # Fall back to Docker if Podman not available or doesn't have compose
+    if (-not $script:ContainerRuntime) {
+        if (Test-Command "docker") {
+            Write-Status "Docker found, checking if it's running..."
+            try {
+                docker version | Out-Null
+            }
+            catch {
+                Write-Error "Docker is not running. Please start Docker Desktop."
+                exit 1
+            }
+            
+            # Check if Docker Compose is available
+            $composeAvailable = $false
+            if (Test-Command "docker-compose") {
+                $composeAvailable = $true
+                $script:ContainerRuntime = "docker"
+                $script:ComposeCommand = "docker-compose"
+            }
+            elseif ((docker compose version 2>$null) -ne $null) {
+                $composeAvailable = $true
+                $script:ContainerRuntime = "docker"
+                $script:ComposeCommand = "docker compose"
+            }
+            
+            if (-not $composeAvailable) {
+                Write-Error "Docker found but no compose support available. Please ensure Docker Desktop is properly installed."
+                exit 1
+            }
+            
+            Write-Success "Using Docker with compose support"
+        }
+        else {
+            Write-Error "Neither Docker nor Podman is installed. Please install one of them first."
+            Write-Host "Docker Desktop: https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
+            Write-Host "Podman Desktop: https://podman-desktop.io/" -ForegroundColor Cyan
+            exit 1
+        }
     }
     
     # Check available memory (Windows)
@@ -134,13 +160,13 @@ function Initialize-EnvFile {
 
 # Function to start services
 function Start-Services {
-    Write-Status "Starting Docker services..."
+    Write-Status "Starting $script:ContainerRuntime services..."
     
     # Pull images first
-    Write-Status "Pulling Docker images..."
+    Write-Status "Pulling container images..."
     & $script:ComposeCommand pull
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to pull Docker images"
+        Write-Error "Failed to pull container images"
         exit 1
     }
     
@@ -223,9 +249,13 @@ function Get-EmbeddingModel {
     
     # Pull the model using Ollama API
     try {
-        docker exec roo-ollama ollama pull $model
+        if ($script:ContainerRuntime -eq "podman") {
+            podman exec roo-ollama ollama pull $model
+        } else {
+            docker exec roo-ollama ollama pull $model
+        }
         if ($LASTEXITCODE -ne 0) {
-            throw "Docker exec failed"
+            throw "Container exec failed"
         }
     }
     catch {
@@ -242,8 +272,13 @@ function Test-Setup {
     Write-Status "Verifying setup..."
     
     # Check if services are running
-    $qdrantRunning = docker ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
-    $ollamaRunning = docker ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
+    if ($script:ContainerRuntime -eq "podman") {
+        $qdrantRunning = podman ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
+        $ollamaRunning = podman ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
+    } else {
+        $qdrantRunning = docker ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
+        $ollamaRunning = docker ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
+    }
     
     if (-not $qdrantRunning) {
         Write-Error "Qdrant container is not running"
@@ -266,7 +301,11 @@ function Test-Setup {
     }
     
     try {
-        $modelList = docker exec roo-ollama ollama list
+        if ($script:ContainerRuntime -eq "podman") {
+            $modelList = podman exec roo-ollama ollama list
+        } else {
+            $modelList = docker exec roo-ollama ollama list
+        }
         if (-not ($modelList | Select-String $model)) {
             Write-Warning "Embedding model $model not found in Ollama"
             return $false
