@@ -49,7 +49,7 @@ function Test-Requirements {
     
     # Check for container runtime (Podman or Docker)
     $script:ContainerRuntime = ""
-    $script:ComposeCommand = ""
+    $script:ComposeCommand = @()
     
     # Check for Podman first
     if (Test-Command "podman") {
@@ -57,7 +57,7 @@ function Test-Requirements {
         try {
             podman compose version | Out-Null
             $script:ContainerRuntime = "podman"
-            $script:ComposeCommand = "podman compose"
+            $script:ComposeCommand = @("podman", "compose")
             Write-Success "Using Podman with compose support"
         }
         catch {
@@ -82,12 +82,12 @@ function Test-Requirements {
             if (Test-Command "docker-compose") {
                 $composeAvailable = $true
                 $script:ContainerRuntime = "docker"
-                $script:ComposeCommand = "docker-compose"
+                $script:ComposeCommand = @("docker-compose")
             }
             elseif ((docker compose version 2>$null) -ne $null) {
                 $composeAvailable = $true
                 $script:ContainerRuntime = "docker"
-                $script:ComposeCommand = "docker compose"
+                $script:ComposeCommand = @("docker", "compose")
             }
             
             if (-not $composeAvailable) {
@@ -164,7 +164,7 @@ function Start-Services {
     
     # Pull images first
     Write-Status "Pulling container images..."
-    & $script:ComposeCommand pull
+    & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] pull
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to pull container images"
         exit 1
@@ -172,7 +172,7 @@ function Start-Services {
     
     # Start services
     Write-Status "Starting services in detached mode..."
-    & $script:ComposeCommand up -d
+    & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] up -d
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to start services"
         exit 1
@@ -345,9 +345,10 @@ function Show-Status {
     Write-Host "  • Ollama: $ollamaDir" -ForegroundColor White
     Write-Host ""
     Write-Host "Management commands:" -ForegroundColor Cyan
-    Write-Host "  • Stop services: $script:ComposeCommand down" -ForegroundColor White
-    Write-Host "  • View logs: $script:ComposeCommand logs -f" -ForegroundColor White
-    Write-Host "  • Restart: $script:ComposeCommand restart" -ForegroundColor White
+    $commandString = $script:ComposeCommand -join " "
+    Write-Host "  • Stop services: $commandString down" -ForegroundColor White
+    Write-Host "  • View logs: $commandString logs -f" -ForegroundColor White
+    Write-Host "  • Restart: $commandString restart" -ForegroundColor White
     Write-Host ""
 }
 
