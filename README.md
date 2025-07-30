@@ -1,6 +1,6 @@
-# Roo Code Indexing Docker Setup
+# Roo Code Indexing Container Setup
 
-A production-ready Docker setup for local code indexing using Qdrant vector database and Ollama for embeddings. This configuration provides a self-contained environment for the Roo code indexing system. See [roo](https://docs.roocode.com/features/codebase-indexing?utm_source=extension&utm_medium=ide&utm_campaign=settings)
+A production-ready container setup for local code indexing using Qdrant vector database and Ollama for embeddings. This configuration provides a self-contained environment for the Roo code indexing system with support for both Docker and Podman container runtimes. See [roo](https://docs.roocode.com/features/codebase-indexing?utm_source=extension&utm_medium=ide&utm_campaign=settings)
 
 ## 🚀 Quick Start
 
@@ -21,15 +21,40 @@ A production-ready Docker setup for local code indexing using Qdrant vector data
    
    # On Windows (using Git Bash or WSL):
    bash setup.sh
-   
-   # Or manually with Docker:
-   docker compose up -d
-   
-   # Or manually with Podman:
-   podman compose up -d
    ```
 
-> **Note**: The setup scripts automatically detect whether you have Docker or Podman installed and use the appropriate container runtime. Podman support requires Podman 4.0+ with compose functionality.
+The setup scripts automatically detect and use the best available container runtime:
+- **Podman** (preferred): Uses native Kubernetes pods for better resource management
+- **Docker**: Falls back to Docker Compose for compatibility
+
+## 🔧 Manual Commands
+
+### With Podman (Kubernetes Pods)
+```bash
+# Start services using pods
+podman play kube pod.yaml
+
+# Stop the pod
+podman pod stop roo-code-indexing
+
+# Remove the pod
+podman pod rm roo-code-indexing
+
+# View logs
+podman pod logs roo-code-indexing
+```
+
+### With Docker (Compose)
+```bash
+# Start services
+docker compose up -d
+
+# Stop services
+docker compose down
+
+# View logs
+docker compose logs -f
+```
 
 ## 📋 System Requirements
 
@@ -39,11 +64,41 @@ A production-ready Docker setup for local code indexing using Qdrant vector data
 - **Storage**: 10GB+ free space for models and data
 
 ### Software Requirements
-- Docker 20.10+ OR Podman 4.0+
-- Docker Compose 2.0+ OR Podman Compose
-- curl (for health checks)
 
-> **Note**: Podman support requires Podman 4.0+ with compose functionality. On some systems, you may need to configure Podman's socket or enable lingering for proper operation.
+**Container Runtime (choose one):**
+- **Podman 4.0+** (recommended for Linux/macOS)
+  - Native Kubernetes pod support
+  - Rootless containers for better security
+  - Better resource management
+- **Docker 20.10+** with Docker Compose 2.0+
+  - Universal compatibility
+  - Mature ecosystem
+
+**Additional tools:**
+- curl (for health checks during setup)
+
+### Podman Installation
+
+#### Linux (Ubuntu/Debian)
+```bash
+sudo apt-get update
+sudo apt-get install -y podman
+```
+
+#### Linux (CentOS/RHEL/Fedora)
+```bash
+sudo dnf install -y podman
+```
+
+#### macOS
+```bash
+brew install podman
+podman machine init
+podman machine start
+```
+
+#### Windows
+Download and install [Podman Desktop](https://podman-desktop.io/) or use Windows Subsystem for Linux (WSL).
 
 ## 🎯 Embedding Model Selection
 
@@ -147,35 +202,37 @@ podman compose up
 ### Stopping Services
 
 ```bash
-# Stop services (keeps data) - Docker
+# Stop services (keeps data) - Podman pods
+podman pod stop roo-code-indexing
+
+# Stop services (keeps data) - Docker Compose
 docker compose down
 
-# Stop services (keeps data) - Podman  
-podman compose down
+# Stop and remove everything - Podman pods
+podman pod stop roo-code-indexing
+podman pod rm roo-code-indexing
+rm -rf ./data/  # Optional: removes all data
 
-# Stop and remove volumes (deletes data) - Docker
+# Stop and remove volumes (deletes data) - Docker Compose
 docker compose down -v
-
-# Stop and remove volumes (deletes data) - Podman
-podman compose down -v
 ```
 
 ### Restarting Services
 
 ```bash
-# Restart all services - Docker
+# Restart pod - Podman
+podman pod restart roo-code-indexing
+
+# Restart all services - Docker Compose
 docker compose restart
 
-# Restart all services - Podman
-podman compose restart
+# Restart specific container in pod - Podman
+podman restart roo-code-indexing-qdrant
+podman restart roo-code-indexing-ollama
 
-# Restart specific service - Docker
+# Restart specific service - Docker Compose
 docker compose restart qdrant
 docker compose restart ollama
-
-# Restart specific service - Podman
-podman compose restart qdrant
-podman compose restart ollama
 ```
 
 ### Auto-start with System Boot
@@ -306,19 +363,22 @@ sudo launchctl load /Library/LaunchDaemons/com.roo.indexing.plist
 The setup includes automatic health checks. Verify services are running:
 
 ```bash
-# Check service status
-docker compose ps
-# or
-podman compose ps
+# Check service status - Podman pods
+podman pod ps
+podman ps --pod
 
-# Check health status
+# Check service status - Docker Compose
+docker compose ps
+
+# Check health status - Podman pods  
+podman logs roo-code-indexing-qdrant
+podman logs roo-code-indexing-ollama
+
+# Check health status - Docker Compose
 docker compose logs qdrant
 docker compose logs ollama
-# or
-podman compose logs qdrant
-podman compose logs ollama
 
-# Manual health checks
+# Manual health checks (works with both)
 curl http://localhost:6333/health
 curl http://localhost:11434/api/tags
 ```
@@ -400,13 +460,14 @@ The PowerShell setup script provides the same functionality:
 
 #### Services Won't Start
 
-1. **Check Docker/Podman is running**:
+1. **Check container runtime is available**:
    ```bash
+   # For Podman
+   podman --version
+   
+   # For Docker
    docker --version
    docker compose --version
-   # or
-   podman --version
-   podman compose version
    ```
 
 2. **Check port conflicts**:
@@ -426,11 +487,11 @@ The PowerShell setup script provides the same functionality:
 
 1. **Model not found**:
    ```bash
-   # Pull model manually with Docker
-   docker exec roo-ollama ollama pull nomic-embed-text
+   # With Podman pods
+   podman exec roo-code-indexing-ollama ollama pull nomic-embed-text
    
-   # Pull model manually with Podman
-   podman exec roo-ollama ollama pull nomic-embed-text
+   # With Docker Compose
+   docker exec roo-ollama ollama pull nomic-embed-text
    ```
 
 2. **Out of memory errors**:
@@ -442,52 +503,70 @@ The PowerShell setup script provides the same functionality:
 
 1. **Check Qdrant logs**:
    ```bash
-   # Docker
-   docker compose logs qdrant
+   # With Podman pods
+   podman logs roo-code-indexing-qdrant
    
-   # Podman
-   podman compose logs qdrant
+   # With Docker Compose
+   docker compose logs qdrant
    ```
 
 2. **Reset Qdrant data**:
    ```bash
-   # Docker
+   # With Podman pods
+   podman pod stop roo-code-indexing
+   podman pod rm roo-code-indexing
+   rm -rf ./data/qdrant
+   ./setup.sh
+   
+   # With Docker Compose
    docker compose down
    rm -rf ./data/qdrant
    docker compose up -d
-   
-   # Podman
-   podman compose down
-   rm -rf ./data/qdrant
-   podman compose up -d
    ```
 
 #### Podman-Specific Issues
 
-1. **Permission errors or cgroup issues**:
+1. **Pod management**:
+   ```bash
+   # Check pod status
+   podman pod ls
+   
+   # Check containers in pod
+   podman ps --pod
+   
+   # View pod logs
+   podman pod logs roo-code-indexing
+   
+   # Restart pod
+   podman pod restart roo-code-indexing
+   ```
+
+2. **Permission errors or cgroup issues**:
    ```bash
    # Enable lingering for user services
    loginctl enable-linger $USER
    
-   # Start podman socket
+   # Start podman socket (if needed for other tools)
    systemctl --user enable --now podman.socket
-   
-   # Set DOCKER_HOST for compose compatibility
-   export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
    ```
 
-2. **Compose provider warnings**:
-   - Podman uses Docker's compose plugin for compatibility
-   - Warning messages about "external compose provider" are normal
-   - Functionality remains the same as Docker Compose
-
-3. **Network connectivity issues**:
+3. **Volume mount issues**:
    ```bash
-   # Check if services are bound to correct interfaces
-   podman ps
+   # Check if directories exist and have proper permissions
+   ls -la ./data/
    
-   # Check podman system info
-   podman system info
+   # Recreate directories with proper permissions
+   mkdir -p ./data/qdrant ./data/ollama
+   chmod 755 ./data/qdrant ./data/ollama
+   ```
+
+4. **SELinux issues (Linux)**:
+   ```bash
+   # Add SELinux context for volumes
+   chcon -Rt svirt_sandbox_file_t ./data/
+   
+   # Or disable SELinux temporarily for testing
+   sudo setenforce 0
    ```
 
 ### Performance Optimization

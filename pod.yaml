@@ -1,0 +1,84 @@
+# Kubernetes Pod definition for Roo Code Indexing  
+# Generated automatically by setup.ps1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: roo-code-indexing
+  labels:
+    app: roo-code-indexing
+spec:
+  restartPolicy: Always
+  
+  containers:
+  # Qdrant vector database
+  - name: qdrant
+    image: qdrant/qdrant:latest
+    ports:
+    - containerPort: 6333
+      hostPort: 6333
+      protocol: TCP
+    - containerPort: 6334
+      hostPort: 6334
+      protocol: TCP
+    env:
+    - name: QDRANT__SERVICE__HTTP_PORT
+      value: "6333"
+    - name: QDRANT__SERVICE__GRPC_PORT
+      value: "6334"
+    - name: QDRANT__LOG_LEVEL
+      value: "INFO"
+    volumeMounts:
+    - name: qdrant-storage
+      mountPath: /qdrant/storage
+    resources:
+      limits:
+        memory: "4Gi"
+      requests:
+        memory: "2Gi"
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 6333
+      initialDelaySeconds: 40
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+
+  # Ollama LLM service
+  - name: ollama
+    image: ollama/ollama:latest
+    ports:
+    - containerPort: 11434
+      hostPort: 11434
+      protocol: TCP
+    env:
+    - name: OLLAMA_HOST
+      value: "0.0.0.0"
+    - name: OLLAMA_ORIGINS
+      value: "*"
+    volumeMounts:
+    - name: ollama-models
+      mountPath: /root/.ollama
+    resources:
+      limits:
+        memory: "24Gi"
+      requests:
+        memory: "16Gi"
+    livenessProbe:
+      httpGet:
+        path: /api/tags
+        port: 11434
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+
+  volumes:
+  - name: qdrant-storage
+    hostPath:
+      path: /home/runner/work/roo-code-indexing/roo-code-indexing/data/qdrant
+      type: DirectoryOrCreate
+  - name: ollama-models
+    hostPath:
+      path: /home/runner/work/roo-code-indexing/roo-code-indexing/data/ollama
+      type: DirectoryOrCreate
