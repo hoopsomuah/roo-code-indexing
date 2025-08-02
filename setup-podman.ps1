@@ -171,92 +171,25 @@ function New-PodYaml {
     $qdrantUnixPath = $qdrantAbsPath -replace '\\', '/' -replace '^C:', '/c'
     $ollamaUnixPath = $ollamaAbsPath -replace '\\', '/' -replace '^C:', '/c'
     
-$podYaml = @"
-# Kubernetes Pod definition for Roo Code Indexing  
-# Generated automatically by setup-podman.ps1
-apiVersion: v1
-kind: Pod
-metadata:
-  name: roo-code-indexing
-  labels:
-    app: roo-code-indexing
-spec:
-  restartPolicy: Always
-  
-  containers:
-  # Qdrant vector database
-  - name: qdrant
-    image: qdrant/qdrant:latest
-    ports:
-    - containerPort: 6333
-      hostPort: $qdrantPort
-      protocol: TCP
-    - containerPort: 6334
-      hostPort: $qdrantGrpcPort
-      protocol: TCP
-    env:
-    - name: QDRANT__SERVICE__HTTP_PORT
-      value: "6333"
-    - name: QDRANT__SERVICE__GRPC_PORT
-      value: "6334"
-    - name: QDRANT__LOG_LEVEL
-      value: "$qdrantLogLevel"
-    volumeMounts:
-    - name: qdrant-storage
-      mountPath: /qdrant/storage
-    resources:
-      limits:
-        memory: "$qdrantMemLimitK8s"
-      requests:
-        memory: "$qdrantMemReqK8s"
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: 6333
-      initialDelaySeconds: 40
-      periodSeconds: 30
-      timeoutSeconds: 10
-      failureThreshold: 3
-
-  # Ollama LLM service
-  - name: ollama
-    image: ollama/ollama:latest
-    ports:
-    - containerPort: 11434
-      hostPort: $ollamaPort
-      protocol: TCP
-    env:
-    - name: OLLAMA_HOST
-      value: "0.0.0.0"
-    - name: OLLAMA_ORIGINS
-      value: "*"
-    volumeMounts:
-    - name: ollama-models
-      mountPath: /root/.ollama
-    resources:
-      limits:
-        memory: "$ollamaMemLimitK8s"
-      requests:
-        memory: "$ollamaMemReqK8s"
-    livenessProbe:
-      httpGet:
-        path: /api/tags
-        port: 11434
-      initialDelaySeconds: 60
-      periodSeconds: 30
-      timeoutSeconds: 10
-      failureThreshold: 3
-
-  volumes:
-  - name: qdrant-storage
-    hostPath:
-      path: $qdrantUnixPath
-      type: DirectoryOrCreate
-  - name: ollama-models
-    hostPath:
-      path: $ollamaUnixPath
-      type: DirectoryOrCreate
-"@
+    # Check if template exists
+    if (-not (Test-Path "pod.yaml.template")) {
+        Write-Error "❌ pod.yaml.template not found! Please ensure the template file exists."
+        exit 1
+    }
+    
+    # Read template and substitute variables
+    $templateContent = Get-Content "pod.yaml.template" -Raw
+    $podYaml = $templateContent `
+        -replace '{{QDRANT_PORT}}', $qdrantPort `
+        -replace '{{QDRANT_GRPC_PORT}}', $qdrantGrpcPort `
+        -replace '{{QDRANT_LOG_LEVEL}}', $qdrantLogLevel `
+        -replace '{{QDRANT_MEM_LIMIT_K8S}}', $qdrantMemLimitK8s `
+        -replace '{{QDRANT_MEM_REQ_K8S}}', $qdrantMemReqK8s `
+        -replace '{{OLLAMA_PORT}}', $ollamaPort `
+        -replace '{{OLLAMA_MEM_LIMIT_K8S}}', $ollamaMemLimitK8s `
+        -replace '{{OLLAMA_MEM_REQ_K8S}}', $ollamaMemReqK8s `
+        -replace '{{QDRANT_UNIX_PATH}}', $qdrantUnixPath `
+        -replace '{{OLLAMA_UNIX_PATH}}', $ollamaUnixPath
     
     Set-Content -Path "pod.yaml" -Value $podYaml
     Write-Success "Generated pod.yaml with environment-specific configuration"
