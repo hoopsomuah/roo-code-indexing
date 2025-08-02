@@ -231,6 +231,26 @@ function Test-SystemRunning {
 function Start-Services {
     Write-Status "Starting Podman services..."
     
+    # Check if pod already exists (but may not be fully running)
+    $podExists = podman pod exists roo-code-indexing 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Warning "Pod 'roo-code-indexing' already exists. Removing it to ensure clean setup..."
+        
+        # Stop the existing pod (ignore errors if already stopped)
+        Write-Status "Stopping existing pod..."
+        podman pod stop roo-code-indexing 2>$null | Out-Null
+        
+        # Remove the existing pod
+        Write-Status "Removing existing pod..."
+        podman pod rm roo-code-indexing 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to remove existing pod. Please run 'podman pod rm roo-code-indexing' manually."
+            exit 1
+        }
+        
+        Write-Success "Existing pod removed successfully"
+    }
+    
     # Generate pod configuration with current environment
     New-PodYaml
     
