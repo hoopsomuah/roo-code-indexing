@@ -47,11 +47,19 @@ function Test-Command {
 function Test-Requirements {
     Write-Status "Checking system requirements..."
     
-    # Check for Docker
+    # Check for container runtime (Podman or Docker)
     $script:ContainerRuntime = ""
     $script:ComposeCommand = @()
+    $script:UsePods = $false
     
-    if (Test-Command "docker") {
+    # Check for Podman first
+    if (Test-Command "podman") {
+        Write-Status "Podman found, using native pod support..."
+        $script:ContainerRuntime = "podman"
+        $script:UsePods = $true
+        Write-Success "Using Podman with Kubernetes pod support"
+    }
+    elseif (Test-Command "docker") {
         Write-Status "Docker found, checking if it's running..."
         try {
             docker version | Out-Null
@@ -79,12 +87,13 @@ function Test-Requirements {
             exit 1
         }
         
+        $script:UsePods = $false
         Write-Success "Using Docker with compose support"
     }
     else {
-        Write-Error "Docker is not installed. Please install Docker Desktop first."
+        Write-Error "Neither Docker nor Podman is installed. Please install one of them first."
         Write-Host "Docker Desktop: https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
-        Write-Host "For Podman support, use setup-podman.ps1" -ForegroundColor Cyan
+        Write-Host "Podman Desktop: https://podman-desktop.io/" -ForegroundColor Cyan
         exit 1
     }
     
@@ -128,7 +137,140 @@ function New-DataDirectories {
     Write-Success "Data directories created: $qdrantDir, $ollamaDir"
 }
 
+# Function to generate Kubernetes YAML with environment variables
+function New-PodYaml {
+    Write-Status "Generating Kubernetes pod configuration..."
+    
+    # Load environment variables if .env exists
+    $envVars = @{}
+    if (Test-Path ".env") {
+        Get-Content ".env" | ForEach-Object {
+            if ($_ -match "^([^#][^=]+)=(.*)$") {
+                $envVars[$matches[1]] = $matches[2]
+            }
+        }
+    }
+    
+    # Set defaults
+    $qdrantPort = if ($envVars["QDRANT_PORT"]) { $envVars["QDRANT_PORT"] } else { "6333" }
+    $qdrantGrpcPort = if ($envVars["QDRANT_GRPC_PORT"]) { $envVars["QDRANT_GRPC_PORT"] } else { "6334" }
+    $qdrantLogLevel = if ($envVars["QDRANT_LOG_LEVEL"]) { $envVars["QDRANT_LOG_LEVEL"] } else { "INFO" }
+    $qdrantMemoryLimit = if ($envVars["QDRANT_MEMORY_LIMIT"]) { $envVars["QDRANT_MEMORY_LIMIT"] } else { "4G" }
+    $qdrantMemoryReservation = if ($envVars["QDRANT_MEMORY_RESERVATION"]) { $envVars["QDRANT_MEMORY_RESERVATION"] } else { "2G" }
+    $qdrantStoragePath = if ($envVars["QDRANT_STORAGE_PATH"]) { $envVars["QDRANT_STORAGE_PATH"] } else { ".\data\qdrant" }
+    
+    $ollamaPort = if ($envVars["OLLAMA_PORT"]) { $envVars["OLLAMA_PORT"] } else { "11434" }
+    $ollamaMemoryLimit = if ($envVars["OLLAMA_MEMORY_LIMIT"]) { $envVars["OLLAMA_MEMORY_LIMIT"] } else { "24G" }
+    $ollamaMemoryReservation = if ($envVars["OLLAMA_MEMORY_RESERVATION"]) { $envVars["OLLAMA_MEMORY_RESERVATION"] } else { "16G" }
+    $ollamaModelsPath = if ($envVars["OLLAMA_MODELS_PATH"]) { $envVars["OLLAMA_MODELS_PATH"] } else { ".\data\ollama" }
+    
+    # Convert memory limits to Kubernetes format
+    $qdrantMemLimitK8s = $qdrantMemoryLimit -replace 'G$', 'Gi'
+    $qdrantMemReqK8s = $qdrantMemoryReservation -replace 'G$', 'Gi'
+    $ollamaMemLimitK8s = $ollamaMemoryLimit -replace 'G$', 'Gi'
+    $ollamaMemReqK8s = $ollamaMemoryReservation -replace 'G$', 'Gi'
+    
+    # Get absolute paths
+    $qdrantAbsPath = (Resolve-Path $qdrantStoragePath -ErrorAction SilentlyContinue).Path
+    if (-not $qdrantAbsPath) { $qdrantAbsPath = (New-Item -ItemType Directory -Path $qdrantStoragePath -Force).FullName }
+    
+    $ollamaAbsPath = (Resolve-Path $ollamaModelsPath -ErrorAction SilentlyContinue).Path  
+    if (-not $ollamaAbsPath) { $ollamaAbsPath = (New-Item -ItemType Directory -Path $ollamaModelsPath -Force).FullName }
+    
+    # Convert Windows paths to Unix-style for Podman
+    $qdrantUnixPath = $qdrantAbsPath -replace '\\', '/' -replace '^C:', '/c'
+    $ollamaUnixPath = $ollamaAbsPath -replace '\\', '/' -replace '^C:', '/c'
+    
+$podYaml = @"
+# Kubernetes Pod definition for Roo Code Indexing  
+# Generated automatically by setup.ps1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: roo-code-indexing
+  labels:
+    app: roo-code-indexing
+spec:
+  restartPolicy: Always
+  
+  containers:
+  # Qdrant vector database
+  - name: qdrant
+    image: qdrant/qdrant:latest
+    ports:
+    - containerPort: 6333
+      hostPort: $qdrantPort
+      protocol: TCP
+    - containerPort: 6334
+      hostPort: $qdrantGrpcPort
+      protocol: TCP
+    env:
+    - name: QDRANT__SERVICE__HTTP_PORT
+      value: "6333"
+    - name: QDRANT__SERVICE__GRPC_PORT
+      value: "6334"
+    - name: QDRANT__LOG_LEVEL
+      value: "$qdrantLogLevel"
+    volumeMounts:
+    - name: qdrant-storage
+      mountPath: /qdrant/storage
+    resources:
+      limits:
+        memory: "$qdrantMemLimitK8s"
+      requests:
+        memory: "$qdrantMemReqK8s"
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 6333
+      initialDelaySeconds: 40
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
 
+  # Ollama LLM service
+  - name: ollama
+    image: ollama/ollama:latest
+    ports:
+    - containerPort: 11434
+      hostPort: $ollamaPort
+      protocol: TCP
+    env:
+    - name: OLLAMA_HOST
+      value: "0.0.0.0"
+    - name: OLLAMA_ORIGINS
+      value: "*"
+    volumeMounts:
+    - name: ollama-models
+      mountPath: /root/.ollama
+    resources:
+      limits:
+        memory: "$ollamaMemLimitK8s"
+      requests:
+        memory: "$ollamaMemReqK8s"
+    livenessProbe:
+      httpGet:
+        path: /api/tags
+        port: 11434
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+
+  volumes:
+  - name: qdrant-storage
+    hostPath:
+      path: $qdrantUnixPath
+      type: DirectoryOrCreate
+  - name: ollama-models
+    hostPath:
+      path: $ollamaUnixPath
+      type: DirectoryOrCreate
+"@
+    
+    Set-Content -Path "pod.yaml" -Value $podYaml
+    Write-Success "Generated pod.yaml with environment-specific configuration"
+}
 function Initialize-EnvFile {
     if (-not (Test-Path ".env")) {
         Write-Status "Creating .env file from template..."
@@ -145,23 +287,56 @@ function Initialize-EnvFile {
 function Start-Services {
     Write-Status "Starting $script:ContainerRuntime services..."
     
-    # Docker: Use Docker Compose
-    Write-Status "Pulling images..."
-    & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] pull
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to pull container images"
-        exit 1
+    if ($script:UsePods) {
+        # Podman: Use Kubernetes pods
+        Write-Status "Pulling images and starting pod..."
+        
+        # Generate pod configuration with current environment
+        New-PodYaml
+        
+        # Pull images first
+        Write-Status "Pulling container images..."
+        podman pull qdrant/qdrant:latest
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to pull Qdrant image"
+            exit 1
+        }
+        
+        podman pull ollama/ollama:latest
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to pull Ollama image"
+            exit 1
+        }
+        
+        # Start the pod using Kubernetes YAML
+        Write-Status "Starting pod with Kubernetes configuration..."
+        podman play kube pod.yaml
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to start pod"
+            exit 1
+        }
+        
+        Write-Success "Pod started successfully"
     }
-    
-    # Start services
-    Write-Status "Starting services in detached mode..."
-    & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] up -d
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to start services"
-        exit 1
+    else {
+        # Docker: Use Docker Compose
+        Write-Status "Pulling images..."
+        & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] pull
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to pull container images"
+            exit 1
+        }
+        
+        # Start services
+        Write-Status "Starting services in detached mode..."
+        & $script:ComposeCommand[0] $script:ComposeCommand[1..($script:ComposeCommand.Length-1)] up -d
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to start services"
+            exit 1
+        }
+        
+        Write-Success "Services started successfully"
     }
-    
-    Write-Success "Services started successfully"
 }
 
 # Function to wait for services to be healthy
@@ -232,7 +407,18 @@ function Get-EmbeddingModel {
     
     # Pull the model using Ollama API
     try {
-        docker exec roo-ollama ollama pull $model
+        if ($script:UsePods) {
+            # Podman pod: container name includes pod name prefix
+            podman exec roo-code-indexing-ollama ollama pull $model
+        }
+        else {
+            # Docker compose: use standalone container name
+            if ($script:ContainerRuntime -eq "podman") {
+                podman exec roo-ollama ollama pull $model
+            } else {
+                docker exec roo-ollama ollama pull $model
+            }
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Container exec failed"
         }
@@ -251,17 +437,46 @@ function Test-Setup {
     Write-Status "Verifying setup..."
     
     # Check if services are running
-    $qdrantRunning = docker ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
-    $ollamaRunning = docker ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
-    
-    if (-not $qdrantRunning) {
-        Write-Error "Qdrant container is not running"
-        return $false
+    if ($script:UsePods) {
+        # Podman pod: check pod and containers
+        $podExists = podman pod exists roo-code-indexing 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Roo Code Indexing pod is not running"
+            return $false
+        }
+        
+        $qdrantRunning = podman ps --filter "name=roo-code-indexing-qdrant" --format "{{.Names}}" | Select-String "roo-code-indexing-qdrant"
+        $ollamaRunning = podman ps --filter "name=roo-code-indexing-ollama" --format "{{.Names}}" | Select-String "roo-code-indexing-ollama"
+        
+        if (-not $qdrantRunning) {
+            Write-Error "Qdrant container is not running in pod"
+            return $false
+        }
+        
+        if (-not $ollamaRunning) {
+            Write-Error "Ollama container is not running in pod"
+            return $false
+        }
     }
-    
-    if (-not $ollamaRunning) {
-        Write-Error "Ollama container is not running"
-        return $false
+    else {
+        # Docker compose: check individual containers
+        if ($script:ContainerRuntime -eq "podman") {
+            $qdrantRunning = podman ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
+            $ollamaRunning = podman ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
+        } else {
+            $qdrantRunning = docker ps --filter "name=roo-qdrant" --format "{{.Names}}" | Select-String "roo-qdrant"
+            $ollamaRunning = docker ps --filter "name=roo-ollama" --format "{{.Names}}" | Select-String "roo-ollama"
+        }
+        
+        if (-not $qdrantRunning) {
+            Write-Error "Qdrant container is not running"
+            return $false
+        }
+        
+        if (-not $ollamaRunning) {
+            Write-Error "Ollama container is not running"
+            return $false
+        }
     }
     
     # Check if model is available
@@ -275,7 +490,16 @@ function Test-Setup {
     }
     
     try {
-        $modelList = docker exec roo-ollama ollama list
+        if ($script:UsePods) {
+            $modelList = podman exec roo-code-indexing-ollama ollama list
+        }
+        else {
+            if ($script:ContainerRuntime -eq "podman") {
+                $modelList = podman exec roo-ollama ollama list
+            } else {
+                $modelList = docker exec roo-ollama ollama list
+            }
+        }
         if (-not ($modelList | Select-String $model)) {
             Write-Warning "Embedding model $model not found in Ollama"
             return $false
@@ -316,12 +540,18 @@ function Show-Status {
     Write-Host ""
     Write-Host "Management commands:" -ForegroundColor Cyan
     
-    $commandString = $script:ComposeCommand -join " "
-    Write-Host "  • Stop services: $commandString down" -ForegroundColor White
-    Write-Host "  • View logs: $commandString logs -f" -ForegroundColor White
-    Write-Host "  • Restart: $commandString restart" -ForegroundColor White
-    Write-Host ""
-    Write-Host "For Podman support, use setup-podman.ps1" -ForegroundColor Cyan
+    if ($script:UsePods) {
+        Write-Host "  • Stop pod: podman pod stop roo-code-indexing" -ForegroundColor White
+        Write-Host "  • Remove pod: podman pod rm roo-code-indexing" -ForegroundColor White
+        Write-Host "  • View logs: podman pod logs roo-code-indexing" -ForegroundColor White
+        Write-Host "  • Restart pod: podman pod restart roo-code-indexing" -ForegroundColor White
+    }
+    else {
+        $commandString = $script:ComposeCommand -join " "
+        Write-Host "  • Stop services: $commandString down" -ForegroundColor White
+        Write-Host "  • View logs: $commandString logs -f" -ForegroundColor White
+        Write-Host "  • Restart: $commandString restart" -ForegroundColor White
+    }
     Write-Host ""
 }
 
