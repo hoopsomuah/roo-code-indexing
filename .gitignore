@@ -1,0 +1,8 @@
+# Environment configuration
+.env
+
+# Container runtime data directories
+data/
+
+# Generated Kubernetes pod configuration
+pod.yaml
